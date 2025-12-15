@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Project Manager Dashboard Resume</title>
+    <!-- 1. 載入 Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 2. 載入 React & ReactDOM CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- 3. 載入 Babel：用於在瀏覽器中編譯 JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        /* 由於我們在 JSX 內直接定義顏色，這裡只保留基礎字體設置 */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-slate-900">
+    <!-- React 組件將會渲染到這個 div 中 -->
+    <div id="root"></div>
+
+    <!-- 所有的 React/JSX 程式碼已合併到此單一區塊 -->
+    <script type="text/babel">
+        import React, { useState, useEffect, useCallback } from 'react';
+        import { initializeApp } from 'firebase/app';
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+        import { getFirestore, doc, setDoc, setLogLevel } from 'firebase/firestore';
+        import {
+            CheckCircle, CalendarCheck, TrendingDown, Users, Zap,
+            RefreshCw, ListOrdered, BarChart2, ShieldAlert, Users2, GitBranch,
+            Megaphone, Send, Copy, Lock
+        } from 'lucide-react';
+
+        // --- 全局變數/配置 ---
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-pm-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // --- 輔助組件: 訊息通知 ---
+        const MessageToast = ({ message, type }) => {
+            if (!message) return null;
+
+            let bgColor = 'bg-green-500';
+            if (type === 'error') bgColor = 'bg-red-500';
+            if (type === 'info') bgColor = 'bg-blue-500';
+
+            return (
+                <div 
+                    className={`fixed bottom-5 right-5 p-4 rounded-lg shadow-xl text-white ${bgColor} transition-opacity duration-500 z-50`}
+                    style={{ opacity: message ? 1 : 0 }}
+                >
+                    {message}
+                </div>
+            );
+        };
+
+        // --- 主應用程式組件 ---
+        const App = () => {
+            const [userId, setUserId] = useState('N/A');
+            const [authStatus, setAuthStatus] = useState('載入中...');
+            const [message, setMessage] = useState('');
+            const [messageType, setMessageType] = useState('info');
+            const [dbInstance, setDbInstance] = useState(null);
+
+            // 訊息顯示工具
+            const showMessage = useCallback((msg, type = 'success') => {
+                setMessage(msg);
+                setMessageType(type);
+                setTimeout(() => setMessage(''), 3000);
+            }, []);
+
+            // Firebase 初始化與認證
+            useEffect(() => {
+                // 設置 Firebase 日誌級別
+                if (typeof setLogLevel === 'function') {
+                    setLogLevel('Debug');
+                }
+
+                let dbRef, authRef;
+                let unsubscribe;
+
+                async function initFirebase() {
+                    try {
+                        if (Object.keys(firebaseConfig).length === 0) {
+                            console.warn("Firebase Config not found. Running in local mode.");
+                            setAuthStatus('本地模式 (未連線)');
+                            setUserId(crypto.randomUUID());
+                            return;
+                        }
+                        
+                        const app = initializeApp(firebaseConfig);
+                        authRef = getAuth(app);
+                        dbRef = getFirestore(app);
+                        setDbInstance(dbRef);
+
+                        // 認證監聽器
+                        unsubscribe = onAuthStateChanged(authRef, async (user) => {
+                            if (user) {
+                                setUserId(user.uid);
+                                setAuthStatus('已認證');
+                                console.log("Firebase Auth Ready. User ID:", user.uid);
+
+                                // 寫入/更新 PM 數據 (模擬)
+                                const pmData = {
+                                    name: "專案經理 (模擬)",
+                                    title: "PMP 認證 | 產品與技術轉型專家",
+                                    metrics: {
+                                        delivered: 35,
+                                        ontime: 0.98,
+                                        budget_variance: -0.05,
+                                        max_team: 12
+                                    },
+                                    last_update: new Date().toISOString()
+                                };
+                                try {
+                                    await setDoc(doc(dbRef, `artifacts/${appId}/users/${user.uid}/profile`, 'pm_data'), pmData, { merge: true });
+                                } catch (e) {
+                                    console.error("Firestore 寫入失敗:", e);
+                                    showMessage('資料寫入失敗', 'error');
+                                }
+
+                            } else {
+                                setAuthStatus('匿名登入');
+                                setUserId(crypto.randomUUID()); 
+                            }
+                        });
+
+                        // 執行登入
+                        if (initialAuthToken) {
+                            await signInWithCustomToken(authRef, initialAuthToken);
+                            showMessage('Canvas 認證成功！', 'success');
+                        } else {
+                            await signInAnonymously(authRef);
+                            showMessage('Canvas 匿名登入成功！', 'info');
+                        }
+
+                    } catch (error) {
+                        console.error("Firebase 初始化失敗:", error);
+                        setAuthStatus('認證失敗');
+                        showMessage(`認證失敗: ${error.code}`, 'error');
+                    }
+                }
+
+                initFirebase();
+
+                // 清理 function
+                return () => {
+                    if (unsubscribe) unsubscribe();
+                };
+            }, [showMessage]);
+
+
+            // 複製 User ID 到剪貼簿
+            const copyUserId = () => {
+                if (userId && userId !== 'N/A') {
+                    const el = document.createElement('textarea');
+                    el.value = userId;
+                    document.body.appendChild(el);
+                    el.select();
+                    try {
+                        document.execCommand('copy');
+                        showMessage(`已複製 Canvas ID: ${userId.substring(0, 8)}...`, 'success');
+                    } catch (err) {
+                        console.error('無法複製到剪貼簿', err);
+                        showMessage('複製失敗，請手動複製', 'error');
+                    }
+                    document.body.removeChild(el);
+                } else {
+                    showMessage('無法複製，ID 仍在載入中。', 'info');
+                }
+            };
+            
+            // 定義顏色和樣式變數 (深色系)
+            const PRIMARY_COLOR = 'emerald-400';
+            const BG_DARK = 'bg-slate-900';
+            const CARD_DARK = 'bg-slate-800';
+            const TEXT_LIGHT = 'text-slate-200';
+            const TEXT_SECONDARY = 'text-slate-400';
+            const BORDER_COLOR = 'border-slate-700';
+
+            // 核心指標數據
+            const metrics = [
+                { icon: CheckCircle, value: '35+', label: '成功交付專案' },
+                { icon: CalendarCheck, value: '98%', label: '準時交付率' },
+                { icon: TrendingDown, value: '-5%', label: '平均預算偏差', color: 'text-red-400' },
+                { icon: Users, value: '12', label: '最大團隊規模' },
+            ];
+
+            // 方法論數據
+            const methodologies = [
+                { icon: RefreshCw, name: '敏捷 (Agile)', subtitle: '資深實施者', color: 'text-indigo-400' },
+                { icon: ListOrdered, name: 'Scrum Master', subtitle: 'PSM I 認證', color: 'text-blue-400' },
+                { icon: BarChart2, name: '數據分析', subtitle: '決策支援', color: 'text-green-400' },
+                { icon: ShieldAlert, name: '風險管理', subtitle: '主動預防', color: 'text-red-400' },
+                { icon: Users2, name: '利益關係人', subtitle: '溝通協調', color: 'text-yellow-400' },
+                { icon: GitBranch, name: '變更控制', subtitle: '影響評估', color: 'text-teal-400' },
+            ];
+
+            // 軟技能數據
+            const softSkills = [
+                { name: '溝通協商', level: 95 },
+                { name: '領導力與賦權', level: 90 },
+                { name: '跨部門問題解決', level: 88 },
+                { name: '衝突與危機管理', level: 80 },
+            ];
+
+            // 專案經驗數據
+            const projects = [
+                {
+                    title: 'B2B SaaS 平台敏捷轉型',
+                    period: '2023.01 - 2024.03',
+                    description: '領導跨國 8 人團隊，將傳統瀑布式開發流程遷移至 Scrum，成功交付三個主要產品模組。',
+                    results: [
+                        { value: '150%', label: 'Feature Delivery 提升' },
+                        { value: '99.5%', label: 'UAT 驗收通過率' },
+                        { value: '3M+', label: '年營收貢獻' },
+                    ],
+                    borderColor: 'border-blue-500'
+                },
+                {
+                    title: 'AI 客服機器人導入與優化',
+                    period: '2021.07 - 2022.12',
+                    description: '負責從概念驗證到正式上線的端到端管理，確保技術整合與業務部門需求一致。',
+                    results: [
+                        { value: '40%', label: '客服工單量降低' },
+                        { value: '50萬', label: '節省營運成本' },
+                        { value: '100%', label: '依時程交付' },
+                    ],
+                    borderColor: 'border-purple-500'
+                }
+            ];
+
+            return (
+                <div className={`min-h-screen ${BG_DARK} ${TEXT_LIGHT} transition-colors duration-500`}>
+                    <div id="app" className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
+                        
+                        {/* 頂部導航/Firebase 狀態 */}
+                        <header className={`flex justify-between items-center mb-10 pb-4 border-b ${BORDER_COLOR}`}>
+                            <h1 className="text-3xl font-extrabold text-slate-100 tracking-tight">
+                                專案經理 | <span className={`text-${PRIMARY_COLOR}`}>成果儀表板</span>
+                            </h1>
+                            <div className="text-sm flex items-center">
+                                <Lock className={`w-4 h-4 mr-1 ${TEXT_SECONDARY}`} />
+                                <span className={TEXT_SECONDARY}>認證狀態:</span> 
+                                <span className={`ml-1 font-medium ${authStatus === '已認證' ? `text-${PRIMARY_COLOR}` : 'text-yellow-400'}`}>
+                                    {authStatus}
+                                </span>
+                            </div>
+                        </header>
+
+                        {/* 區塊 1: 專案經理核心指標 (Metrics Dashboard) */}
+                        <section className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
+                            {metrics.map((metric, index) => (
+                                <div key={index} className={`${CARD_DARK} p-6 text-center rounded-xl shadow-lg hover:ring-2 hover:ring-${PRIMARY_COLOR} transition duration-300 ease-in-out`}>
+                                    <div className={`flex items-center justify-center w-12 h-12 rounded-full bg-${PRIMARY_COLOR}/20 mx-auto mb-3`}>
+                                        <metric.icon className={`w-6 h-6 text-${PRIMARY_COLOR}`} />
+                                    </div>
+                                    <p className={`text-4xl font-bold ${metric.color || 'text-slate-100'}`}>{metric.value}</p>
+                                    <p className={`text-sm ${TEXT_SECONDARY} mt-1`}>{metric.label}</p>
+                                </div>
+                            ))}
+                        </section>
+
+                        {/* 區塊 2: 專案執行能力與方法論 (Methodology & Skills) */}
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-12">
+                            {/* 左側: 專案方法論 */}
+                            <div className="lg:col-span-2 p-8 rounded-xl shadow-lg" style={{ backgroundColor: '#1F2937' }}> {/* Slightly darker card for emphasis */}
+                                <h2 className={`text-2xl font-semibold text-slate-100 mb-6 flex items-center`}>
+                                    <Zap className={`w-6 h-6 mr-2 text-${PRIMARY_COLOR}`} />
+                                    核心專案方法論
+                                </h2>
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                                    {methodologies.map((method, index) => (
+                                        <div key={index} className={`flex flex-col items-center p-3 border ${BORDER_COLOR} rounded-lg transition duration-200 hover:bg-slate-700`}>
+                                            <method.icon className={`w-7 h-7 ${method.color} mb-2`} />
+                                            <span className="text-sm font-medium text-slate-200">{method.name}</span>
+                                            <span className="text-xs text-slate-400">{method.subtitle}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* 右側: 軟性技能進度條 */}
+                            <div className={`${CARD_DARK} p-8 rounded-xl shadow-lg`}>
+                                <h2 className={`text-2xl font-semibold text-slate-100 mb-6 flex items-center`}>
+                                    <Megaphone className={`w-6 h-6 mr-2 text-${PRIMARY_COLOR}`} />
+                                    關鍵軟技能
+                                </h2>
+                                <div className="space-y-4">
+                                    {softSkills.map((skill, index) => (
+                                        <div key={index}>
+                                            <div className={`flex justify-between text-sm ${TEXT_SECONDARY} mb-1`}>
+                                                <span>{skill.name}</span>
+                                                <span className={`font-medium text-${PRIMARY_COLOR}`}>{skill.level}%</span>
+                                            </div>
+                                            <div className="h-2 rounded-full bg-slate-700">
+                                                <div 
+                                                    className={`h-2 rounded-full bg-${PRIMARY_COLOR}`} 
+                                                    style={{ width: `${skill.level}%`, transition: 'width 1s ease-out' }}
+                                                ></div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        {/* 區塊 3: 專案經驗 (Experience - The Core) */}
+                        <section className="mb-12">
+                            <h2 className={`text-3xl font-extrabold text-slate-100 mb-8 border-l-4 border-${PRIMARY_COLOR} pl-4`}>
+                                專案履歷：關鍵成果與影響
+                            </h2>
+                            <div className="space-y-8">
+                                {projects.map((project, index) => (
+                                    <div key={index} className={`${CARD_DARK} p-6 rounded-xl shadow-xl border-l-8 ${project.borderColor}`}>
+                                        <div className="flex justify-between items-start mb-3">
+                                            <h3 className={`text-xl font-semibold ${project.borderColor.replace('border-', 'text-')}`}>{project.title}</h3>
+                                            <span className={`text-sm font-medium ${TEXT_SECONDARY} bg-slate-700 px-3 py-1 rounded-full`}>{project.period}</span>
+                                        </div>
+                                        <p className={`${TEXT_SECONDARY} mb-4`}>{project.description}</p>
+                                        <div className={`grid grid-cols-3 gap-4 text-center border-t ${BORDER_COLOR} pt-4 mt-4`}>
+                                            {project.results.map((result, resIndex) => (
+                                                <div key={resIndex}>
+                                                    <p className={`text-2xl font-bold text-${PRIMARY_COLOR}`}>{result.value}</p>
+                                                    <p className={`text-xs ${TEXT_SECONDARY}`}>{result.label}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </section>
+
+                        {/* 區塊 4: 聯絡方式與個人品牌 (Call to Action) */}
+                        <section className={`${CARD_DARK} p-8 text-center rounded-xl shadow-2xl`}>
+                            <h2 className="text-3xl font-extrabold text-slate-100 mb-4">
+                                準備好開始您的下一個成功專案了嗎？
+                            </h2>
+                            <p className="text-lg text-slate-400 mb-6">
+                                我的專案管理能力已獲業界認證。期待與您討論如何將您的願景轉化為可執行的藍圖。
+                            </p>
+                            <div className="flex justify-center space-x-4">
+                                <a href="mailto:your.email@example.com" className={`inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-full shadow-lg text-slate-900 bg-${PRIMARY_COLOR} hover:bg-emerald-500 transition duration-300`}>
+                                    <Send className="w-5 h-5 mr-2" />
+                                    發送合作邀約
+                                </a>
+                                <button onClick={copyUserId} className={`inline-flex items-center px-6 py-3 border ${BORDER_COLOR} text-base font-medium rounded-full shadow-lg ${TEXT_LIGHT} ${CARD_DARK} hover:bg-slate-700 transition duration-300`}>
+                                    <Copy className={`w-5 h-5 mr-2 ${TEXT_SECONDARY}`} />
+                                    複製我的 Canvas ID
+                                </button>
+                            </div>
+                            <div className={`mt-4 text-sm ${TEXT_SECONDARY}`}>
+                                Canvas ID: <span id="user-id">{userId}</span>
+                            </div>
+                        </section>
+                        
+                        <MessageToast message={message} type={messageType} />
+                    </div>
+                </div>
+            );
+        };
+        
+        // 渲染主要的 App 元件
+        const appElement = React.createElement(App);
+        const container = document.getElementById('root');
+        
+        // 確保 React 18 的 root 建立方式
+        if (container) {
+            const root = ReactDOM.createRoot(container);
+            root.render(appElement);
+        } else {
+            console.error("Root container not found!");
+        }
+    </script>
+</body>
+</html>
